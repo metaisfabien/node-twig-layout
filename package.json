@@ -1,0 +1,25 @@
+{
+  "name": "twig-layout",
+  "description": "A layout system",
+  "author": {
+    "name": "Metais Fabien",
+    "email": "metaisfabien@gmail.com"
+  },
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/metaisfabien/node-twig-layout.git"
+  },
+  "main": "layout.js",
+  "contributors": [],
+  "maintainers": [],
+  "license": "MIT",
+  "dependencies": {
+    "twig": "^1.12.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">= 0.8.0"
+  },
+  "scripts": {}
+}
