@@ -65,7 +65,7 @@ app.listen(3000, function () {
 
 ## /views/page/default.html
 The template for the page
-For the template syntax read the mustache js [documentation](https://github.com/janl/mustache.js) 
+For the template syntax read the twig js [documentation](https://github.com/twigjs/twig.js/wiki) 
 ```html
 <template>
     <!doctype html>
