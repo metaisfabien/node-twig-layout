@@ -10,6 +10,15 @@
     "type": "git",
     "url": "https://github.com/metaisfabien/node-twig-layout.git"
   },
+  "keywords": [
+    "twig",
+    "layout",
+    "template",
+    "templates",
+    "organize",
+    "engine",
+    "html"
+  ],
   "main": "layout.js",
   "contributors": [],
   "maintainers": [],
