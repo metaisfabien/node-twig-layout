@@ -1,15 +1,26 @@
 {
-  "name": "twig-layout",
-  "description": "A layout system",
   "author": {
     "name": "Metais Fabien",
     "email": "metaisfabien@gmail.com"
   },
-  "version": "0.1.1",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/metaisfabien/node-twig-layout.git"
+  "bugs": {
+    "url": "https://github.com/metaisfabien/node-twig-layout/issues"
   },
+  "contributors": [],
+  "dependencies": {
+    "twig": "^1.12.0"
+  },
+  "_dep": {
+    "@midgar/utils": "^0.0.1"
+  },
+  "description": "A layout system",
+  "devDependencies": {
+    "ink-docstrap": "^1.3.2"
+  },
+  "engines": {
+    "node": ">= 0.8.0"
+  },
+  "homepage": "https://github.com/metaisfabien/node-twig-layout#readme",
   "keywords": [
     "twig",
     "layout",
@@ -19,16 +30,16 @@
     "engine",
     "html"
   ],
-  "main": "layout.js",
-  "contributors": [],
-  "maintainers": [],
   "license": "MIT",
-  "dependencies": {
-    "twig": "^1.12.0"
+  "main": "layout.js",
+  "maintainers": [],
+  "name": "twig-layout",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/metaisfabien/node-twig-layout.git"
   },
-  "devDependencies": {},
-  "engines": {
-    "node": ">= 0.8.0"
+  "scripts": {
+    "build-docs": "jsdoc -c ./jsdoc.js -t ./node_modules/ink-docstrap/template  -r ."
   },
-  "scripts": {}
+  "version": "0.1.4"
 }

@@ -5,89 +5,228 @@
  * MIT Licensed
  */
 
-var twig = require('twig')
-var path = require('path')
-var fs = require('fs')
+const twig = require('twig')
+const EventEmitter = require('events')
+const {promisify} = require('util')
 
-var Block = require('./block')
+const path = require('path')
+const fs = require('fs')
+const utils = require('@midgar/utils')
 
+const Block = require('./block')
 /**
- * Layout Object
- *
- * Load the blocks and render them
+ * Cache object use standard functions you'd expect in most caches
+ * 
+ * @typedef {Object} Cache
+ * @property {function(string, *):undefined} set Set something in cache
+ * @property {function(string):*} get Get something from cache
+ * @property {function(string):*} detl Delete from cache
  */
-class Layout {
-  constructor (options) {
-    //options
-    this.options = options || {}
+/**
+ * Layout Class
+ * Manage blocks
+ */
+class Layout extends EventEmitter {
 
-    //store the block instance by name
+
+  /**
+   * @param {Object} options Layout options
+   * @param {Cache} options.cache Cache instance
+   * @param {string} options.cacheDir Path to the cache dir
+   * @param {string} options.views Path to the views dir
+   */
+  constructor(options) {
+    super()
+    //options
+    this.options = Object.assign({
+      cache: false,
+      cacheDir: null,
+      views: '',
+    }, options)
+
+    //
+    /**
+     * Store blocks instance by name
+     * @type {Object}
+     */
     this.blocks = {}
 
-    //store the block instance by parent
+    /**
+     * Store the block instance by parent
+     * @type {Object}
+     * @private
+     */
     this._blocks = {}
 
-    //template loading state
-    this.isLoad = false
+
+    /**
+     * Define if render a page or juste template block
+     * @type {boolen}
+     */
+    this.renderPage = true
+
+    /**
+     * Template block instance
+     * @type {Block}
+     * @private
+     */
+    this._templateBlock = null
+
+    /**
+     * Cache instance
+     * @type {Cache}
+     * @private
+     */
+    this._cache = options.cache
+
+    /**
+     * Cache key prefix
+     * @type {string}
+     * @private
+     */
+    this._cacheFilePrefix = 'layout:'
   }
 
   /**
-   * load a template file
-   *
-   * @param blocks
+   * Extend twig and init cache
    */
-  async loadTemplate (template, config) {
-    config = config || {}
+  async init() {
+    await Promise.all([this._extendTwig(), this._initCache()])
+  }
+
+  /**
+   * Extend twig with options extendFilter and extendFunction
+   * @private
+   */
+  async _extendTwig() {
+    const extendFilters = this.options.extendFilters || {}
+    const extendFunctions = this.options.extendFunctions || {}
+
+    await Promise.all([this.extendTwigFilters(extendFilters),this.extendTwigFunctions(extendFunctions)])
+  }
+
+  /**
+   * Extend twig filters
+   * 
+   * @param {Object} extendFilters filters object {name: filter function, ...}
+   */
+  async extendTwigFilters(extendFilters) {
+    //list filers
+    await utils.asyncMap(extendFilters, (filter, name) => {
+      //add filter
+      this.extendTwigFilter (name, filter)
+    })
+  }
+
+  /**
+   * Extend twig functions
+   * 
+   * @param {Object} extendFilters filters object {name: filter function, ...}
+   */
+  async extendTwigFunctions(extendFunctions) {
+    //list functions
+    await utils.asyncMap(extendFunctions, (fn, name) => {
+      //add function
+      this.extendTwigFunction (name, fn)
+    })
+  }
+  
+  /**
+   * Extend twig filter
+   * 
+   * @param {String}   name   filter name
+   * @param {Function} filter filter function
+   */
+  extendTwigFilter (name, filter) {
+    twig.extendFilter(name, filter)
+  }
+
+ /**
+  * Extend twig function
+  * 
+  * @param {String}   name function name
+  * @param {Function} fn   function
+  */
+  extendTwigFunction (name, fn) {
+    twig.extendFunction(name, fn)
+  }
+
+  /**
+   * Check if the cache dir exist and create it
+   * @private
+   */
+  async _initCache() {
+    //if cache
+    if (this.options.cache) {
+      if (!this.options.cacheDir)
+        throw new Error('No cache dir specified')
+        
+      //check if cache dir exist
+      const exists = await utils.asyncFileExists(this.options.cacheDir)
+      if (!exists) {
+        //create cache dir
+        await utils.asyncMkdir(this.options.cacheDir)
+      }
+    }
+  }
+
+  /**
+   * Load a template file
+   *
+   * @param {string} template Template path relative to the views dir
+   * @param {Object} config   Block config
+   * @param {Object} config.script Block script path
+   */
+  async loadTemplate(template, config = {}) {
     //reset blocks arrays
     this._blocks = {}
-    this.blocks = {}
+    this.blocks = {}      
+    
+    //path of the block script
+    let script = config.script ? config.script : null
 
     //Load the template block
-    var block = await this._loadBlock('', template, config, null, null)
+    const block = await this._loadBlock('', template, config, script, null)
+  
+    this._templateBlock = block
+    if (!block) {
+      throw new Error('Cannot load the main template: ' + template)
+    }
 
     // Check if the page is defined
-    if (!block.page) {
-      throw new Error(
-        'Page is not defined in the layout config for the block ' + template)
+    if (this.renderPage && !block.page) {
+      throw new Error('Page is not defined in the layout config for the block ' + template)
     }
 
     //load the page block
-    this._pageBlock = await this._loadBlock('page', block.page, {}, null,
-      'root')
+    if (this.renderPage) {
+      //load the page block
+      const pageBlock = await this._loadBlock('page', block.page, {}, null, 'root')
 
-    //call after load callbacks
+      if (!pageBlock) {
+        throw new Error('Cannot load the page template: ' + block.page)
+      }
+
+      this._pageBlock = pageBlock
+    }
+
     await this._afterLoad()
-
-    // execute the page block actions
-    if (this._pageBlock.config.actions) {
-      this._processActions(this._pageBlock.config.actions)
-    }
-
-    // execute the blocks actions
-    if (block.config.actions) {
-      this._processActions(block.config.actions)
-    }
-
-    //set the template is loaded
-    this.isLoad = true
   }
 
   /**
    * Call the afterLoad Callbacks on all the blocks
-   *
-   * @return {<void>}
    * @private
    */
   async _afterLoad() {
     //promises array
-    var afterLoads = []
+    const afterLoads = []
 
     //add the promises
-    for (var name in this.blocks)
+    for (const name in this.blocks)
       afterLoads.push(this.blocks[name].afterLoad())
 
     //wait the end
-    await Promise.all(afterLoads)
+    return Promise.all(afterLoads)
   }
 
   /**
@@ -95,18 +234,17 @@ class Layout {
    *
    * @param {Array} blocks blocks config
    * @param {string} parent block name
-   *
    * @private
    */
-  _loadBlocks (blocks, parent) {
-    var loadBlocks = []
-    for (var key in blocks) {
-      var config = blocks[key]
-
+  async _loadBlocks(blocks, parent) {
+    const loadBlocks = []
+    for (let key in blocks) {
+      const config = blocks[key]
+/*
       if (!config.name) {
         throw new Error('A block have no name: ' + JSON.stringify(config))
       }
-
+*/
       if (this.blocks[config.name]) {
         throw new Error('The block  ' + config.name + ' is already defined')
       }
@@ -123,7 +261,7 @@ class Layout {
       }
 
       //path of the block script
-      var script = config.script ? config.script : null
+      let script = config.script ? config.script : null
 
       //load the block
       loadBlocks.push(this._loadBlock(config.name, config.template, config, script, parent))
@@ -145,20 +283,39 @@ class Layout {
    *
    * @private
    */
-  async _loadBlock (name, template, config, script, parent) {
-    //if the block have no name and a template
-    //get the name of the template file for name
-    if (!name && template) {
-      name = template.replace(path.extname(template), '')
+  async _loadBlock(name, template, config, script, parent) {
+    //check if the block have no name and no template connot load the block
+    if (!name && !template) {
+      let error = new Error('A block have no name and no template')
+      this.emit('error', error, {})
+      return null
     }
 
-    //check if the block have a name
-    if (!name) {
-      throw new Error('A block have no name and no template')
+    let block = null
+    try {
+      //create block
+      block = await this.createBlock({ name: name, template: template, config: config, script: script, parent: parent })
+    } catch (error) {
+      const params = {} 
+      if (error.code != 'ENOENT') {
+        if (name) params.block = name
+        if (template) params.template = template
+        if (script) params.script = script
+      } else {
+        if (parent) params.block = parent
+      }
+
+      this.emit('error', error, params)
+      return null
     }
 
-    //create the block instance
-    var block = await this.createBlock({name: name, template: template,config: config, script: script, parent: parent})
+    if (!block) 
+      return null
+    
+    if (!block.name) {
+      this.emit('error', 'A block have no name', {template: template, script: script})
+      return null
+    }
 
     if (this._blocks[block.parent] == undefined) {
       this._blocks[block.parent] = []
@@ -168,43 +325,172 @@ class Layout {
     this._blocks[block.parent].push(block)
     this.blocks[block.name] = block
 
-    //load the children blocks define in the block config
-    if (block.config.children != undefined &&
-      Array.isArray(block.config.children)) {
-      this._loadBlocks(block.config.children, block.name)
-    }
-
     return block
   }
 
   /**
    * Load a block class from a js file
    *
-   * @param {string} script block file path
+   * @param {Object} options  block options
+   * @param {string} template template file path
    *
-   * @return {*}
-   *
+   * @return {Block}
    * @private
    */
-  _loadBlockClass(script) {
-    var filePath = script + '.js'
+  async _loadBlockClass(options, template) {
+    let BlockClass = null
+    const html = template && template.html ? template.html : null
+    
+    if (!template || !template.script) {
+      //if the template contain no block class try to use the script
+      if (options.script) {
+        BlockClass = await utils.asyncRequire(options.script)
+      } else {
+        //if no block class found use a Block class
+        BlockClass = Block
+      }
+    } else {
+      BlockClass = template.script
+    }
 
-    //the block is in the block directory or in the path define in this.options.blocks
-    var dirs = []
-    if (this.options.blocks) dirs.push(this.options.blocks)
-    dirs.push(__dirname + '/blocks')
+    //if the file exist require the file and return it
+    return this._createBlockInstance(BlockClass, options, html)
+  }
 
-    for (var key in dirs) {
-      var dir = dirs[key]
+  /**
+   * Create the block instance
+   *  
+   * @param {constructor} BlockClass  block constructor
+   * @param {Object} options Block options
+   * @param {string} options.name Block name
+   * @param {string} options.parent Block parent name
+   * @param {string} options.template Block template path
+   * @param {String} html 
+   * @private
+   */
+  async _createBlockInstance(BlockClass, options, html) {
+    try {
+      //create the block instance
+      const block = new BlockClass(this, {
+        name: options.name, 
+        html: html, 
+        config: options.config || {},
+        parent: options.parent,
+        template: options.template || null,
+        cache: this._cache
+      })
 
-      //if the file exist require the file and return it
-      if (fs.existsSync(path.join(dir, filePath))) {
-        return require(path.join(dir, filePath))
+      try {
+        await block.init()
+      } catch (error) {
+        const params = {} 
+        if (options.name) params.block = options.name
+        if (options.template) params.template = options.template
+        if (options.script) params.script = options.script
+        this.emit('error', 'connot init block')
+        this.emit('error', error, params)
+  
+        return null
+      }
+
+      await this._afterInitBlock(block)
+
+      //if block have no html and no template in his option
+      //and have a temple on his instance load it
+      if (!block.html && !options.template && block.template) {
+        const template = await this._loadTemplate(block.template)
+        if (template.html)
+          block.html = template.html
+      }
+      
+      return block
+    } catch (error) {
+      console.log(error)
+      throw error
+    }
+  }
+
+  /**
+   * Call afterInit callback and load child block
+   * 
+   * @param {*} block 
+   */
+  async _afterInitBlock(block) {
+    if (!block)
+      return null
+    
+    const childrenBlock = block.getChildrenBlock()
+    //load children block
+    if (childrenBlock && childrenBlock.length) {
+      await this._loadBlocks(childrenBlock, block.name)
+    }  
+  }
+
+  /**
+   * Put the html and the script in a cache file
+   * @param {*} template 
+   * @param {*} content 
+   */
+  async _cacheTemplate (template, content) {
+    if (!content) 
+      return null
+      
+    const promises = []
+    if (content.script) {
+      promises.push(this._cacheFile(template + '.js', content.script))
+    }
+
+    if (content.html) {
+      promises.push(this._cacheFile(template + '.html', content.html))
+    }
+
+    await Promise.all(promises)
+  }
+
+  /**
+   * Open a template file
+   * search for template and script tags
+   * 
+   * return and object with html and scipt
+   * 
+   * @param {String} template tamplate path
+   * 
+   * @returns {Object}
+   */
+  async _loadFileTemplate(template) {
+    //get the template content
+    let templateContent = await this.getTemplateContent(template)
+    let html = ''
+    let script = null
+
+    if (!templateContent) 
+      return null
+
+    
+    //search for the <template> part
+    const templateTags = templateContent.match(/<template>([\s\S]*?)<\/template>/g)
+    //if there are a <template> tag
+    if (templateTags && templateTags[0]) {
+      //get the html
+      html = templateTags[0].replace(/<\/?template>/g, '')
+      //remove the <template> part of the template content
+      templateContent = templateContent.substring(templateTags[0].length)
+
+
+      //search for a <script> part
+      const scriptTags = templateContent.match(/<script(?:[\s\S]*?)>([\s\S]*?)<\/script>/g)
+      if (scriptTags && scriptTags[0]) {
+        //get the script class and eval it
+        script = scriptTags[0].replace(/<\/?script(?:[\s\S]*?)>/g, '')
       }
     }
 
-    //if no file is found
-    throw new Error('Invalid block script ' + script)
+    //if no template tag and no script tag
+    if (!html && !script) {
+      return {html: templateContent}
+    } else {
+      return {html, script}
+    }
   }
 
   /**
@@ -215,36 +501,39 @@ class Layout {
    * @return {Array}
    * @private
    */
-  _loadTemplate (template) {
-    var html = ''
-    var BlockClass = null
-    //get the template content
-    var templateContent = this.getTemplateContent(template)
+  async _loadTemplate(template) {
 
-    //search for the <template> part
-    var templateTags = templateContent.match(/<template>([\s\S]*?)<\/template>/g)
+    //if use cache load template from cache if it cached
+    if (this.options.cache) {
+      const cache = await this._loadCacheTemplate(template)
+      //if is in cache return cache
+      if ((cache.html !== null && cache.html !== undefined) || (cache.script !== null && cache.script !== undefined))
+        return cache
+      
 
-    //if there are a <template> tag
-    if (templateTags && templateTags[0]) {
-      //get the html
-      html = templateTags[0].replace(/<\/?template>/g, '')
-
-      //remove the <template> part of the template content
-      var scriptContent = templateContent.substring(templateTags[0].length)
-
-      //search for a <script> part
-      var scriptTags = scriptContent.match(/<script>([\s\S]*?)<\/script>/g)
-      if (scriptTags && scriptTags[0]) {
-        //get the script class and eval it
-        var script = scriptTags[0].replace(/<\/?script>/g, '')
-        BlockClass = eval(script)
-      }
-    } else {
-      //if there a no <template> part get all the content
-      html = templateContent
+      const content = await this._loadFileTemplate(template)
+      await this._cacheTemplate(template, content)
+      return content
+    } else { 
+      //Load template form file
+      return this._loadFileTemplate(template)
     }
+  }
 
-    return [html, BlockClass]
+  async _loadCacheTemplate(template) {
+    const htmlFile = template + '.html'
+    const html = this._getCacheFile(htmlFile)
+    const scriptFile = template + '.js'
+    const script = this._getCacheFile(scriptFile)
+    
+    return utils.objectPromises({html, script})
+  }
+  async _getCacheFile(filename) {
+    return this._cache.get(this._cacheFilePrefix + filename)
+  }
+
+  async _cacheFile(filename, content) {
+    return this._cache.set(this._cacheFilePrefix + filename, content)
   }
 
   /**
@@ -254,103 +543,37 @@ class Layout {
    *
    * @return Block
    */
-  async createBlock (options) {
-    var html = ''
-    var BlockClass = null
-
+  async createBlock(options) {
     //if the block have a templete
     if (options.template) {
-      var tpl = this._loadTemplate(options.template)
-      html = tpl[0]
-      BlockClass = tpl[1]
-    }
-
-    if (!BlockClass) {
-      //if the template contain no block class try to use the script
-      if (options.script) {
-        BlockClass = this._loadBlockClass(options.script)
-      } else {
-        //if no block class found use a Block class
-        BlockClass = Block
+      const template = await this._loadTemplate(options.template)
+      if (template.script) {
+        try {
+          template.script = eval(template.script)
+        } catch (error) {
+          console.log('eval layout script error: ' + template.script)
+          console.log(template.script)
+          console.log(error)
+        }
       }
+      return this._loadBlockClass(options, template)
     }
 
-    //create the instance
-    var block = new BlockClass(options.name, html, options.config || {}, options.parent, this)
-    await block.init()
-
-    // load blocks
-    if (block.blocks) {
-      await this._loadBlocks(block.blocks, block.name)
-    }
-
-    return block
+    return this._loadBlockClass(options)
   }
 
   /**
    * Return a Block instance by name
    *
-   * @param name
+   * @param {Sting} name block name
    *
    * @returns Block
    */
-  getBlock (name) {
+  getBlock(name) {
     if (this.blocks[name] != undefined) {
       return this.blocks[name]
     } else {
       throw new Error('The block ' + name + ' doesn\'t exist')
-    }
-  }
-
-  /**
-   * Exec the actions of a layout config
-   *
-   * read the config object and exec actions
-   *
-   * @param config
-   *
-   * @private
-   */
-  _processActions (config) {
-    for (var name in this.blocks) {
-      var block = this.blocks[name]
-      if (config[block.name] != undefined) {
-        this._execActions(block.name, config[block.name])
-      }
-    }
-  }
-
-  /**
-   * Exec the actions of a block
-   *
-   * @param blockName
-   * @param actions
-   *
-   * @private
-   */
-  _execActions (blockName, actions) {
-    //get the block instance
-    var block = this.getBlock(blockName)
-    for (var key in actions) {
-      var action = actions[key]
-
-      //if the action have no method
-      if (!action.method) {
-        throw new Error('Invalid action in the block ' + blockName)
-      }
-
-      //check of the block have the method defined
-      if (block[action.method] == undefined) {
-        throw new Error(
-          'The block ' + blockName + ' (' + block.script + ') have no method ' + action.method)
-      }
-
-      //call the method
-      if (action.args != undefined) {
-        block[action.method].apply(block, action.args)
-      } else {
-        block[action.method]()
-      }
     }
   }
 
@@ -362,27 +585,36 @@ class Layout {
    *
    * @return Object
    */
-  async renderBlocks (parent) {
-    //promises array
-    var renders = []
-
-    //Add the render proomise for each child blocks
-    for (var key in this._blocks[parent])
-      renders.push(this._blocks[parent][key].render())
-
-    //wait the result
-    var result = await Promise.all(renders)
-
-    var blocks = {}
-    var i = 0
-    //add the html in an object with the block name for key
-    for (var key in this._blocks[parent]) {
-      var block = this._blocks[parent][key]
-      blocks[block.name] = result[i]
-      i++
+  async renderBlocks(parent) {
+    const renders = []
+    for (let key in this._blocks[parent]) {
+      const block = this._blocks[parent][key]
+      renders[block.name] = block.render().catch(async (error) => {
+        this.emit('error', error, { block: block.name })
+        //return { key: block.name, value: ''} //continue other blocks
+      })
     }
+    
+    return utils.objectPromises(renders)
+  }
 
-    return blocks
+  /**
+   * Return the block html
+   * 
+   * @param {Sting} name block name
+   * 
+   * @returns {String}
+   */
+  async getBlockHtml(name) {
+    try {
+      const block = this.getBlock(name)
+      return block.render().catch(async (error) => {
+        this.emit('error', error, { block: block.name })
+        //return { key: block.name, value: ''} //continue other blocks
+      })
+    } catch (error) {
+
+    }
   }
 
   /**
@@ -393,13 +625,15 @@ class Layout {
    *
    * @return String
    */
-  renderHtml (html, data) {
+  async renderHtml(html, data) {
     try {
-      return twig.twig({data: html}).render(data)
-    } catch (e) {
-      console.log(e)
-      console.log(html)
-      return ''
+      return twig.twig({
+        data: html,
+        rethrow: true,
+        allow_async: true
+      }).renderAsync(data)
+    } catch (error) {
+      this.emit('error', error, { file: file })
     }
   }
 
@@ -411,13 +645,14 @@ class Layout {
    *
    * @return String
    */
-  renderFile (file, data) {
-    try {
-      //get the template content and render it
-      return this.renderHtml(this.getTemplateContent(file), data)
-    } catch (e) {
-      throw new Error('Error in template ' + file)
+  async renderFile(file, data) {
+    const html = await this.getTemplateContent(file)
+    if (!html) {
+      return ''
     }
+
+    //get the template content and render it
+    return this.renderHtml(html, data)
   }
 
   /**
@@ -428,8 +663,13 @@ class Layout {
    * @return {string}
    * @private
    */
-  getTemplateContent (file) {
-    return fs.readFileSync(path.join(this.options.views, file), 'utf8')
+  async getTemplateContent(file) {
+    const exists = await utils.asyncFileExists(file)
+    if (exists) {
+      return promisify(fs.readFile)(path.join(this.options.views, file), 'utf8')
+    } else {
+      throw new Error ('file not found: ' + file)
+    }
   }
 
   /**
@@ -437,9 +677,26 @@ class Layout {
    *
    * @return {string}
    */
-  render () {
-    if (!this.isLoad) throw new Error ('Layout is not loaded')
-    return this._pageBlock.render()
+  async render() {
+    //call before render hook
+    await utils.asyncMap(this.blocks, async block => {
+      if (block.beforeRender) {
+        const isCached = await block.isCached()
+        if (!isCached) {
+          try {
+            await block.beforeRender()
+          } catch (error) {
+            this.emit('error', error, { block: block.name })
+          }
+        }
+      }
+    })
+
+    if (this.renderPage) {
+      return this._pageBlock.render()
+    } else {
+      return this._templateBlock.render()
+    }
   }
 }
 

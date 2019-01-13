@@ -1,10 +1,15 @@
 /*!
  * twig-layout
  *
- * Copyright(c) 2018 Metais Fabien
+ * Copyright(c) 2019 Metais Fabien
  * MIT Licensed
  */
 
+/**
+ * 
+ * @typedef {Object} BlockConfig
+ * @property {Array} blocks Children blocks to add
+ */
 /**
  * Block Object
  *
@@ -15,31 +20,105 @@ class Block {
   /**
    * Constructor
    *
-   * @param {string} name name
-   * @param {string} html html template
-   * @param {Object} config block config
-   * @param {string} parent block parent name
-   * @param {Layout} layout layout instance
+   * @param {Layout} layout Layout instance
+   * @param {Object} options Block options
+   * @param {string} options.name Block name
+   * @param {string} options.html Block html
+   * @param {BlockConfig} options.config Block config
+   * @param {string} options.parent Block parnet name
+   * @param {string} options.template Block tamplate path
+   * @param {Cache} options.cache Cache instance
    */
-  constructor (name, html, config, parent, layout) {
-    //layout instance
+  constructor (layout, options) {
+    /**
+     * Layout instance
+     * @type {Layout}
+     */
     this.layout = layout
 
-    //block parent name overwritted by the config
-    this.parent = config.parent ? config.parent : parent
+    /**
+     * template path
+     * @type {string}
+     */
+    this.template = options.template
 
-    //block name
-    this.name = name
+    /**
+     * Config object
+     * @type {Object}
+     */
+    this.config = options.config
+    
+    /**
+     * block parent name take from config or options
+     * @type {string}
+     */
+    this.parent = this.config.parent ? this.config.parent : options.parent
 
-    //html template
-    this.html = html
-    this.config = config
+    /**
+     * Block name
+     * @type {string}
+     */
+    this.name = options.name
+
+    /**
+     * Block html
+     * @type {string}
+     */
+    this.html = options.html
+
+    /**
+     * Block data object, it's the object passed to twig for render
+     * @type {string}
+     */
     this.data = {}
-    this.blocks = []
-    this.page = config.page ? config.page : null
 
-    this.extend()
+    /**
+     * Store children blocks from the config to add them after this block
+     * @private
+     */
+    this._blocks = []
+    /**
+     * Block page path
+     * @type {string|null}
+     */
+    this.page = this.config.page ? this.config.page : null
 
+    /**
+     * Cache instance
+     * @type {Cache}
+     * @private
+     */
+    this._cache = options.cache
+
+    /**
+     * Cache render key 
+     * @type {string|null}
+     * @private
+     */
+    this._cacheRenderKey = null
+
+    /**
+     * Cache render key prefix
+     * @type {string}
+     * @private
+     */
+    this._cacheRenderKeyPrefix = 'layout:block.render:'
+
+    /**
+     * Store the html cached of the block
+     * @type {string}
+     * @private
+     */
+    this._cacheRender = null
+
+    /**
+     * Cache render ttl 
+     * @type {int|null}
+     * @private
+     */
+    this._cacheRenderTtl = null
+
+    //add children block
     if (this.config.blocks) {
       this.addBlocks(this.config.blocks)
     }
@@ -59,8 +138,61 @@ class Block {
 
   /**
    * Before render callback
+   * Call before the render
    */
   async beforeRender () {}
+
+  /**
+   * Check if the block render is cached
+   * @returns {Boolean}
+   */
+  async isCached() {
+    if (!this._cache || !this.cache) {
+      return false
+    } else {
+      return this._getCacheRender().then(cacheRender => {
+        return cacheRender !== null ? true : false
+      })
+    }
+  }
+
+  /**
+   * renturn the render from the cache
+   * @returns {String}
+   * @private
+   */
+  async _getCacheRender() {
+    if (this._cacheRender === null) {
+      //get the cache
+      const cacheRender = await this._cache.get(this._getCacheRenderKey())
+      //if is in cache
+      if (cacheRender !== null && cacheRender !== undefined) {
+        this._cacheRender = cacheRender
+        return cacheRender
+      }
+      return null
+    }
+
+    return this._cacheRender
+  }
+
+  /**
+   * Return the render cache key
+   * 
+   * @returns {String}
+   * @private
+   */
+  _getCacheRenderKey() {
+    if (!this._cacheRenderKey) {
+      if (!this.template) {
+        throw new Error ('A block has no cacheRenderKey and no template')
+      } else {
+      return this._cacheRenderKeyPrefix + this.template
+      }
+    } else {
+      return this._cacheRenderKeyPrefix + this._cacheRenderKey
+    }
+  }
 
   /**
    *  Add many blocks
@@ -68,7 +200,7 @@ class Block {
    * @param {Array} blocks blocks configs array
    */
   addBlocks(blocks) {
-    for (var key in blocks) {
+    for (const key in blocks) {
       this.addBlock(blocks[key])
     }
   }
@@ -76,12 +208,30 @@ class Block {
   /**
    * Add a block
    * All blocks are loaded by the layout
-   * after this block instance is created
+   * after this block init method is called
    *
    * @param {Object} block Block config
+   * @private
    */
   addBlock(block) {
-    this.blocks.push(block)
+    this._blocks.push(block)
+  }
+
+  /**
+   * return the children block to load after this block init
+   */
+  getChildrenBlock() {
+    return this._blocks
+  }
+
+  /**
+   * Get a block instance by name
+   * 
+   * @param {string} name Block name
+   * @return {Block} Block instance
+   */
+  getBlock(name) {
+    return this.layout.getBlock(name)
   }
 
   /**
@@ -89,26 +239,49 @@ class Block {
    *
    * Render the children blocks and the block
    *
-   * @return {String}
+   * @return {string} Block html rendered
    */
   async render () {
-    await this.beforeRender()
-    this.data.blocks = await this.layout.renderBlocks(this.name)
-    return this.layout.renderHtml(this.html, this.data)
+    //if cache is disable render html
+    if (!this._cache || !this.cache) { 
+      return this._getHtml()
+    } else {
+      //try to get cache render
+      const cacheRender = await this._getCacheRender()
+      //if render is cached return it
+      if (cacheRender !== null) {
+        return cacheRender
+      } else {
+        //render html and cache it
+        const html = await this._getHtml()
+        let opts = {}
+
+        //set ttl
+        if (this._cacheRenderTtl) {
+          opts.ttl = this._cacheRenderTtl
+        }
+
+        //save render in cache
+        await  this._cache.set(this._getCacheRenderKey(), html, opts)
+        return html
+      }
+    }
   }
 
   /**
-   * Extend the block Object from the layout config
-   * Extend the template data Object from the layout config
-   *
-   * Used to define methods to use them in the Block or in the html template
+   * Render block and return html
+   * 
+   * @returns {string} Block html rendered
+   * @private
    */
-  extend () {
-    var extend = this.layout.options.extendBlock || {}
-    Object.assign(this, extend)
-
-    var extend = this.layout.options.extendTemplate || {}
-    Object.assign(this.data, extend)
+  async _getHtml() {
+    if (!this.html) {
+      return ''
+    }
+    return this.layout.renderHtml(this.html, this.data).catch((error) => {
+      this.layout.emit('error', error, { block: this.name, html: this.html })
+      return ''
+    })
   }
 }
 

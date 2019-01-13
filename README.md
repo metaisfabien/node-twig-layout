@@ -1,5 +1,7 @@
 ## twig-layout
 
+! In Dev dont use this !
+
 twig-layout is a layout system based on twig.
 
 ## Instalation
@@ -28,30 +30,29 @@ var app = express()
 
 //set the views directory
 app.set('view', './views')
-app.use(layout())
+app.use(layout({
+  extendFilter: {},
+  extendFunction:{}
+}))
 
 //home route
-app.get('/home', function (req, res) {
+app.get('/home', async (req, res) => {
   //load the layout from the file home.html
-  req.layout.loadTemplate('home.html').then(() => {
+  await req.layout.loadTemplate('home.html')
     //send the layout html
-    req.layout.render().then((html) => {
-      res.send(html)
-    })
-  })
+  const html = await req.layout.render()
+  res.send(html)
 })
 
 //test route
 app.get('/test', function (req, res) {
   //load the layout from the file test.html
-  req.layout.loadTemplate('test.html').then(() => {
-    //Set the title of the block head
-    req.layout.getBlock('head').data.title = 'Test page'
-    //send the layout html
-    req.layout.render().then((html) => {
-      res.send(html)
-    })
-  })
+  await req.layout.loadTemplate('test.html')
+  //Set the title of the block head
+  req.layout.getBlock('head').data.title = 'Test page'
+  //send the layout html
+  const html = await req.layout.render()
+  res.send(html)
 })
 
 app.get('*', function (req, res) {
@@ -71,7 +72,7 @@ For the template syntax read the twig js [documentation](https://github.com/twig
     <!doctype html>
     <html lang="en">
     <!-- block head -->
-    {{blocks.head}}
+    {{ getBlockHtml('head') }}
     <body>
 
     <header>
@@ -88,7 +89,7 @@ For the template syntax read the twig js [documentation](https://github.com/twig
     </header>
     <main role="main">
         <!-- block content -->
-        {{blocks.content}}
+        {{ getBlockHtml('content') }}
     </main>
 
     <footer>
@@ -113,7 +114,7 @@ For the template syntax read the twig js [documentation](https://github.com/twig
 
       //content block it just a block container
       //to use block with no html temple use type
-      this.addBlock({name: 'content', script: 'container'})
+      this.addBlock({name: 'content', script: 'twig-layout/scripts/container'})
     }
 
     /**

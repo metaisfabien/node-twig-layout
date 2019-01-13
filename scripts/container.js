@@ -8,8 +8,7 @@ var Block = require('../block');
 
 /**
  * Container block Object
- *
- * use to block and render them
+ * Use to store blocks and render them
  */
 class Container extends Block {
   /**
@@ -19,13 +18,12 @@ class Container extends Block {
    */
   async render() {
     //get the children blocks
-    var blocks = await this.layout.renderBlocks(this.name)
-    var html = '';
+    const blocks = await this.layout.renderBlocks(this.name)
+    let html = '';
     //add the html
-    for (var parent in blocks) {
+    for (const parent in blocks) {
       html += blocks[parent];
     }
-
     return html
   }
 }
