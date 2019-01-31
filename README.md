@@ -24,9 +24,9 @@ $ npm install --save express-twig-layout
 ## index.js
 Create a simple express app with two route: /home and /test
 ```js
-var express = require('express')
-var layout = require('express-twig-layout')
-var app = express()
+const express = require('express')
+const layout = require('express-twig-layout')
+const app = express()
 
 //set the views directory
 app.set('view', './views')
@@ -88,8 +88,10 @@ For the template syntax read the twig js [documentation](https://github.com/twig
         </nav>
     </header>
     <main role="main">
-        <!-- block content -->
-        {{ getBlockHtml('content') }}
+      <h1>{{ this.getSomething() }}</h1>
+      <!-- block content -->
+      {{ getBlockHtml('content') }}
+      <!-- /block content -->
     </main>
 
     <footer>
@@ -100,11 +102,11 @@ For the template syntax read the twig js [documentation](https://github.com/twig
 </template>
 <script>
   //Require the block dependency
-  var Block = require('node-twig-layout/block')
+  const Block = require('node-twig-layout/block')
 
   //Block for the page
   class Default extends Block {
-    init () {
+    async init () {
       //set the name of the block
       //the name of the block can be define in this way or for other block it can be defined in the config
       this.name = 'page'
@@ -118,9 +120,16 @@ For the template syntax read the twig js [documentation](https://github.com/twig
     }
 
     /**
+     * A method called in the template 
+     */
+    async getSomething() {
+      return 'something';
+    }
+
+    /**
      * before render callback
      */
-    beforeRender () {
+    async beforeRender () {
       //Add a css file
       this.layout.getBlock('head').addCss('https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css', -10)
     }
@@ -152,14 +161,14 @@ template for the head block define in the file views/page/default.html
 </template>
 <script>
   //requite the block object
-  var Block = require('node-twig-layout/block')
+  const Block = require('node-twig-layout/block')
 
   //A Test class for the test page
   class Head extends Block {
     /**
      * Init method
      */
-    init() {
+    async init() {
       //unsorted array
       this._css = []
       this._js = []
@@ -170,9 +179,9 @@ template for the head block define in the file views/page/default.html
     }
 
     //add css files
-    addCss (cssFiles, weight = 0) {
+    async addCss (cssFiles, weight = 0) {
       if (Array.isArray(cssFiles)) {
-        for (var key in cssFiles) {
+        for (let key in cssFiles) {
           this._css.push({weight: weight, file: cssFiles[key]})
         }
       } else if (typeof cssFiles === 'string') {
@@ -183,9 +192,9 @@ template for the head block define in the file views/page/default.html
     }
 
     //add js files to the data object
-    addJs (jsFiles) {
+    async addJs (jsFiles) {
       if (Array.isArray(jsFiles)) {
-        for (var key in jsFiles) {
+        for (let key in jsFiles) {
           this._js.push({weight: weight, file: jsFiles[key]})
         }
       } else if (typeof jsFiles === 'string') {
@@ -198,8 +207,8 @@ template for the head block define in the file views/page/default.html
     /**
      * Before render callback
      */
-    beforeRender() {
-      var sort = function(a, b) {
+    async beforeRender() {
+      const sort = function(a, b) {
         return a.weight - b.weight
       }
       this._css.sort(sort);
@@ -226,11 +235,11 @@ The template for the /home route
 </template>
 <script>
   //requite the block object
-  var Block = require('node-twig-layout/block')
+  const Block = require('node-twig-layout/block')
 
   //A Block class for the home page
   class Home extends Block {
-    init () {
+    async init () {
       this.page ='page/default.html'
       //name of the parent block of this block
       //here the block content, it is defined in the file page/default.html
@@ -255,7 +264,7 @@ The template for the /test route
 </template>
 <script>
   //requite the block object
-  var Block = require('node-twig-layout/block')
+  const Block = require('node-twig-layout/block')
 
   //A Test class for the test page
   class Test extends Block {

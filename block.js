@@ -72,6 +72,9 @@ class Block {
      */
     this.data = {}
 
+    //bind block in data
+    this.data.this = this;
+
     /**
      * Store children blocks from the config to add them after this block
      * @private
@@ -128,19 +131,25 @@ class Block {
    * Init callback
    * call at the end of construct
    */
-  async init () {}
+  async init() {}
 
   /**
-   * AfterLoad call back
+   * afterLoadChrildren hook
    * called after all blocks are loaded
    */
-  async afterLoad () {}
+  async afterInitChildren() {}
 
   /**
-   * Before render callback
+   * AfterLoad hook
+   * called after all blocks are loaded
+   */
+  async afterLoad() {}
+
+  /**
+   * beforeRender hook
    * Call before the render
    */
-  async beforeRender () {}
+  async beforeRender() {}
 
   /**
    * Check if the block render is cached

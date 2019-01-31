@@ -6,6 +6,8 @@
  */
 
 const twig = require('twig')
+const stringHash = require('string-hash')
+
 const EventEmitter = require('events')
 const {promisify} = require('util')
 
@@ -22,27 +24,33 @@ const Block = require('./block')
  * @property {function(string):*} get Get something from cache
  * @property {function(string):*} detl Delete from cache
  */
+
 /**
  * Layout Class
  * Manage blocks
  */
 class Layout extends EventEmitter {
 
-
   /**
    * @param {Object} options Layout options
    * @param {Cache} options.cache Cache instance
-   * @param {string} options.cacheDir Path to the cache dir
+   * @param {string} options.tmpDir temp dir to write block in file and require them
    * @param {string} options.views Path to the views dir
    */
   constructor(options) {
     super()
     //options
-    this.options = Object.assign({
+    this._options = Object.assign({
       cache: false,
-      cacheDir: null,
+      tmpDir: null,
+      sourceMap: false,
+      mode: 'tmpfile',
       views: '',
     }, options)
+
+
+    if (!this._options.tmpDir) 
+      throw new Error('No temp dir set')
 
     //
     /**
@@ -99,8 +107,8 @@ class Layout extends EventEmitter {
    * @private
    */
   async _extendTwig() {
-    const extendFilters = this.options.extendFilters || {}
-    const extendFunctions = this.options.extendFunctions || {}
+    const extendFilters = this._options.extendFilters || {}
+    const extendFunctions = this._options.extendFunctions || {}
 
     await Promise.all([this.extendTwigFilters(extendFilters),this.extendTwigFunctions(extendFunctions)])
   }
@@ -112,7 +120,7 @@ class Layout extends EventEmitter {
    */
   async extendTwigFilters(extendFilters) {
     //list filers
-    await utils.asyncMap(extendFilters, (filter, name) => {
+    await utils.asyncMap(extendFilters, async (filter, name) => {
       //add filter
       this.extendTwigFilter (name, filter)
     })
@@ -125,7 +133,7 @@ class Layout extends EventEmitter {
    */
   async extendTwigFunctions(extendFunctions) {
     //list functions
-    await utils.asyncMap(extendFunctions, (fn, name) => {
+    await utils.asyncMap(extendFunctions, async (fn, name) => {
       //add function
       this.extendTwigFunction (name, fn)
     })
@@ -157,17 +165,13 @@ class Layout extends EventEmitter {
    */
   async _initCache() {
     //if cache
-    if (this.options.cache) {
-      if (!this.options.cacheDir)
-        throw new Error('No cache dir specified')
         
       //check if cache dir exist
-      const exists = await utils.asyncFileExists(this.options.cacheDir)
+      const exists = await utils.asyncFileExists(this._options.tmpDir)
       if (!exists) {
         //create cache dir
-        await utils.asyncMkdir(this.options.cacheDir)
+        await utils.asyncMkdir(this._options.tmpDir)
       }
-    }
   }
 
   /**
@@ -225,7 +229,7 @@ class Layout extends EventEmitter {
     for (const name in this.blocks)
       afterLoads.push(this.blocks[name].afterLoad())
 
-    //wait the end
+    //wait the endprivate
     return Promise.all(afterLoads)
   }
 
@@ -423,7 +427,10 @@ class Layout extends EventEmitter {
     //load children block
     if (childrenBlock && childrenBlock.length) {
       await this._loadBlocks(childrenBlock, block.name)
-    }  
+    }
+
+    //after init children hook
+    await block.afterInitChildren()
   }
 
   /**
@@ -457,9 +464,7 @@ class Layout extends EventEmitter {
    * 
    * @returns {Object}
    */
-  async _loadFileTemplate(template) {
-    //get the template content
-    let templateContent = await this.getTemplateContent(template)
+  async _loadFileTemplate(templateContent) {
     let html = ''
     let script = null
 
@@ -502,36 +507,164 @@ class Layout extends EventEmitter {
    * @private
    */
   async _loadTemplate(template) {
+    let Block = null;
+    if (this._options.mode == 'tmpfile') {
+      //if use cache load template from cache if it cached
+      Block = await this._loadTmpBlock(template)
+    }
+   
 
-    //if use cache load template from cache if it cached
-    if (this.options.cache) {
-      const cache = await this._loadCacheTemplate(template)
-      //if is in cache return cache
-      if ((cache.html !== null && cache.html !== undefined) || (cache.script !== null && cache.script !== undefined))
-        return cache
-      
+    let html = null
+    if (this._options.cache) {
+       html = await this._getCacheFile(template)
+    }
+    
+    if (html == null || Block === null) {
 
-      const content = await this._loadFileTemplate(template)
-      await this._cacheTemplate(template, content)
+      //get the template content
+      let templateContent = await this.getTemplateContent(template)
+      const content = await this._loadFileTemplate(templateContent)
+      html = content.html
+
+      if (Block !== null) {
+        content.script = Block
+      } else if (content.script) {
+        content.script = await this._createTmpBlock(template, templateContent, content.script)
+      }
+
+      if (this._options.cache && html !== null)
+        await this._cacheFile(template, html)
+
       return content
-    } else { 
-      //Load template form file
-      return this._loadFileTemplate(template)
+    } else {
+      return {html, script: Block}
     }
   }
 
-  async _loadCacheTemplate(template) {
-    const htmlFile = template + '.html'
-    const html = this._getCacheFile(htmlFile)
-    const scriptFile = template + '.js'
-    const script = this._getCacheFile(scriptFile)
-    
-    return utils.objectPromises({html, script})
+  /**
+   * Create the js file in the temp folder
+   * 
+   * @param {*} filePath 
+   * @param {*} templateContent 
+   * @param {*} content
+   * @private
+   */
+  async _createTmpBlock(filePath, templateContent, content) {
+    //get a hash of the file path
+    const hash = stringHash(filePath)
+    //temp file path
+    const newFilePath = path.join(this._options.tmpDir, hash.toString() + '.js')
+
+    //if source map is enable generate it and update content to load sourcemap
+    if (this._options.sourceMap) {
+      let sourcemap = await this._getSourceMap(templateContent, content, filePath, newFilePath)
+
+      await utils.asyncWriteFile(newFilePath + '.map', sourcemap)
+     // s = Buffer.from(s).toString('base64')
+
+      content = "require('source-map-support').install({environment: 'node', hookRequire: true});" + content +"\n//# sourceMappingURL=" + newFilePath + '.map' //data:application/json;" + s
+
+    }
+
+
+    let Block = null
+    if (this._options.mode == 'tmpfile') {
+      //create tmp file
+      await utils.asyncWriteFile(newFilePath, content)
+
+      try {
+        Block = require(newFilePath)
+      } catch (error) {
+        console.log(error)
+      }
+    } else if (this._options.mode == 'eval') {
+      try {
+        const nodeEval = require('node-eval');
+        Block = nodeEval(content, filePath)
+      } catch (error) {
+        console.log(error)
+      }
+    }
+
+    return Block
   }
+
+  /**
+   * Create a source map file for the block scripts
+   * 
+   * @param {string} templateContent Original template content
+   * @param {string} content         Script tag content
+   * @param {string} filePath        Template file path
+   * @param {string} newFilePath     Temp script file path
+   * @private
+   */
+  async _getSourceMap(templateContent, content, filePath, newFilePath) {
+     //get start js part index
+     const index = templateContent.indexOf(content)
+     //get non js part
+     const tempString = templateContent.substring(0, index)
+     const lineNumber = tempString.split('\n').length
+ 
+     const esprima            = require('esprima');
+     const SourceMapGenerator = require('source-map').SourceMapGenerator;
+ 
+     const map = new SourceMapGenerator({ 
+       file: filePath
+     })
+ 
+     const tokens = esprima.tokenize(content, { loc: true })
+ 
+     let offset = lineNumber - 1
+  
+     tokens.forEach(function(token) {
+       const loc = token.loc.start
+ 
+       map.addMapping({
+         source: filePath,
+         //add lineNumber offset
+         original: {line: loc.line + offset, column: loc.column},
+         generated: {line: loc.line, column: loc.column}
+       })
+     })
+   
+     return map.toString()
+  }
+
+  /**
+   * Try to require a temp block module
+   *
+   * @param {string} filePath Original file path
+   * @private
+   */
+  async _loadTmpBlock(filePath) {
+    //get a hash of the file path
+    const hash = stringHash(filePath)
+    let Block = null
+    try {
+      Block = require(path.join(this._options.tmpDir, hash + '.js'))
+    } catch (error) {
+      //Prevent error if the file not exists
+      if(error.code != 'MODULE_NOT_FOUND') {
+        throw error
+      }
+    }
+
+    return Block
+  }
+
+  /**
+   * 
+   * @param {*} filename 
+   */
   async _getCacheFile(filename) {
     return this._cache.get(this._cacheFilePrefix + filename)
   }
 
+  /**
+   * 
+   * @param {*} filename 
+   * @param {*} content 
+   */
   async _cacheFile(filename, content) {
     return this._cache.set(this._cacheFilePrefix + filename, content)
   }
@@ -547,15 +680,6 @@ class Layout extends EventEmitter {
     //if the block have a templete
     if (options.template) {
       const template = await this._loadTemplate(options.template)
-      if (template.script) {
-        try {
-          template.script = eval(template.script)
-        } catch (error) {
-          console.log('eval layout script error: ' + template.script)
-          console.log(template.script)
-          console.log(error)
-        }
-      }
       return this._loadBlockClass(options, template)
     }
 
@@ -633,7 +757,7 @@ class Layout extends EventEmitter {
         allow_async: true
       }).renderAsync(data)
     } catch (error) {
-      this.emit('error', error, { file: file })
+      this.emit('error', error, { html: html })
     }
   }
 
@@ -666,7 +790,7 @@ class Layout extends EventEmitter {
   async getTemplateContent(file) {
     const exists = await utils.asyncFileExists(file)
     if (exists) {
-      return promisify(fs.readFile)(path.join(this.options.views, file), 'utf8')
+      return promisify(fs.readFile)(path.join(this._options.views, file), 'utf8')
     } else {
       throw new Error ('file not found: ' + file)
     }
