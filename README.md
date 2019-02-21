@@ -1,13 +1,11 @@
-## twig-layout
+## express-twig-layout
 
-! In Dev dont use this !
-
-twig-layout is a layout system based on twig.
+express-twig-layout is a layout system based on twig.
 
 ## Instalation
 
 ```bash
-$ npm install twig-layout
+$ npm install express-twig-layout
 ```
 
 ## Exemple:
@@ -29,30 +27,37 @@ const layout = require('express-twig-layout')
 const app = express()
 
 //set the views directory
-app.set('view', './views')
-app.use(layout({
-  extendFilter: {},
-  extendFunction:{}
+app.set('views', './views')
+
+app.use(layout({      
+  cache: false,
+  tmpDir: './tmp',
+  sourceMap: false,
+  mode: 'eval',
 }))
 
 //home route
-app.get('/home', async (req, res) => {
+app.get('/home', function (req, res) {
   //load the layout from the file home.html
-  await req.layout.loadTemplate('home.html')
+  req.layout.loadTemplate('home.html').then(() => {
     //send the layout html
-  const html = await req.layout.render()
-  res.send(html)
+    req.layout.render().then((html) => {
+      res.send(html)
+    })
+  })
 })
 
 //test route
 app.get('/test', function (req, res) {
   //load the layout from the file test.html
-  await req.layout.loadTemplate('test.html')
-  //Set the title of the block head
-  req.layout.getBlock('head').data.title = 'Test page'
-  //send the layout html
-  const html = await req.layout.render()
-  res.send(html)
+  req.layout.loadTemplate('test.html').then(() => {
+    //Set the title of the block head
+    req.layout.getBlock('head').data.title = 'Test page'
+    //send the layout html
+    req.layout.render().then((html) => {
+      res.send(html)
+    })
+  })
 })
 
 app.get('*', function (req, res) {
@@ -88,10 +93,8 @@ For the template syntax read the twig js [documentation](https://github.com/twig
         </nav>
     </header>
     <main role="main">
-      <h1>{{ this.getSomething() }}</h1>
-      <!-- block content -->
-      {{ getBlockHtml('content') }}
-      <!-- /block content -->
+        <!-- block content -->
+        {{ getBlockHtml('content') }}
     </main>
 
     <footer>
@@ -102,11 +105,11 @@ For the template syntax read the twig js [documentation](https://github.com/twig
 </template>
 <script>
   //Require the block dependency
-  const Block = require('node-twig-layout/block')
+  var Block = require('twig-layout/block')
 
   //Block for the page
   class Default extends Block {
-    async init () {
+    init () {
       //set the name of the block
       //the name of the block can be define in this way or for other block it can be defined in the config
       this.name = 'page'
@@ -120,16 +123,9 @@ For the template syntax read the twig js [documentation](https://github.com/twig
     }
 
     /**
-     * A method called in the template 
-     */
-    async getSomething() {
-      return 'something';
-    }
-
-    /**
      * before render callback
      */
-    async beforeRender () {
+    beforeRender () {
       //Add a css file
       this.layout.getBlock('head').addCss('https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css', -10)
     }
@@ -149,56 +145,54 @@ template for the head block define in the file views/page/default.html
         <meta name="description" content="">
         <meta name="author" content="">
 
-        <title>{{title}}</title>
-        {% for file in css %}
-        <link rel="stylesheet" href="{{file}}">
+        <title>{{ title }}</title>
+        {% for css in this.css %}
+        <link rel="stylesheet" href="{{ css.file }}">
         {% endfor %}
 
-        {% for file in js %}
-        <script src="{{file}}"></script>
+        {% for js in this.js %}
+        <script src="{{ js.file }}"></script>
         {% endfor %}
     </head>
 </template>
 <script>
   //requite the block object
-  const Block = require('node-twig-layout/block')
+  var Block = require('twig-layout/block')
 
   //A Test class for the test page
   class Head extends Block {
     /**
      * Init method
      */
-    async init() {
-      //unsorted array
-      this._css = []
-      this._js = []
+    init() {
+      this.name = 'head'
 
       //data array for render
-      this.data.css = []
-      this.data.js = []
+      this.css = []
+      this.js = []
     }
 
     //add css files
-    async addCss (cssFiles, weight = 0) {
+    addCss (cssFiles, weight = 0) {
       if (Array.isArray(cssFiles)) {
-        for (let key in cssFiles) {
-          this._css.push({weight: weight, file: cssFiles[key]})
+        for (const key in cssFiles) {
+          this.css.push({weight: weight, file: cssFiles[key]})
         }
       } else if (typeof cssFiles === 'string') {
-        this._css.push({weight: weight, file: cssFiles})
+        this.css.push({weight: weight, file: cssFiles})
       } else {
         throw Error('Invalid addCss argument')
       }
     }
 
     //add js files to the data object
-    async addJs (jsFiles) {
+    addJs (jsFiles) {
       if (Array.isArray(jsFiles)) {
-        for (let key in jsFiles) {
-          this._js.push({weight: weight, file: jsFiles[key]})
+        for (const key in jsFiles) {
+          this.js.push({weight: weight, file: jsFiles[key]})
         }
       } else if (typeof jsFiles === 'string') {
-        this._js.push({weight: weight, file: jsFiles})
+        this.js.push({weight: weight, file: jsFiles})
       } else {
         throw Error('Invalid addJs argument')
       }
@@ -207,17 +201,12 @@ template for the head block define in the file views/page/default.html
     /**
      * Before render callback
      */
-    async beforeRender() {
+    beforeRender() {
       const sort = function(a, b) {
         return a.weight - b.weight
       }
-      this._css.sort(sort);
-      for (const key in this._css)
-        this.data.css.push(this._css[key].file)
-
-      this._js.sort(sort);
-      for (const key in this._js)
-        this.data.js.push(this._js[key].file)
+      this.css.sort(sort);
+      this.js.sort(sort);
     }
   }
 
@@ -230,20 +219,23 @@ The template for the /home route
 ```html
 <template>
     <div>
-        <h1>Home page</h1>
+        <h1>{{ this.title }}</h1>
     </div>
 </template>
 <script>
   //requite the block object
-  const Block = require('node-twig-layout/block')
+  var Block = require('twig-layout/block')
 
   //A Block class for the home page
   class Home extends Block {
-    async init () {
+    init () {
       this.page ='page/default.html'
       //name of the parent block of this block
       //here the block content, it is defined in the file page/default.html
       this.parent = 'content'
+      this.name = 'home'
+
+      this.title = 'Home page'
     }
 
     beforeRender() {
@@ -259,12 +251,12 @@ The template for the /test route
 ```html
 <template>
     <div class="test">
-        <h1>Test</h1>
+        <h1>{{ this.title }}</h1>
     </div>
 </template>
 <script>
   //requite the block object
-  const Block = require('node-twig-layout/block')
+  var Block = require('twig-layout/block')
 
   //A Test class for the test page
   class Test extends Block {
@@ -272,7 +264,9 @@ The template for the /test route
       this.page ='page/default.html'
       //name of the parent block of this block
       //here the block content, it is defined in the file page/default.html
-      this.parent= 'content'
+      this.parent = 'content'
+      this.name = 'test'
+      this.title = 'Test'
     }
   }
 
