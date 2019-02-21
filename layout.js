@@ -137,6 +137,8 @@ class Layout extends EventEmitter {
       //add function
       this.extendTwigFunction (name, fn)
     })
+    
+    this.extendTwigFunction ('getBlockHtml', (name) =>  this.getBlockHtml(name))
   }
   
   /**
@@ -788,9 +790,10 @@ class Layout extends EventEmitter {
    * @private
    */
   async getTemplateContent(file) {
-    const exists = await utils.asyncFileExists(file)
+    const filePath = path.join(this._options.views, file);
+    const exists = await utils.asyncFileExists(filePath)
     if (exists) {
-      return promisify(fs.readFile)(path.join(this._options.views, file), 'utf8')
+      return promisify(fs.readFile)(filePath, 'utf8')
     } else {
       throw new Error ('file not found: ' + file)
     }
