@@ -93,41 +93,47 @@
 
 
     <section class="readme-section">
-        <article><h2>twig-layout</h2><p>! In Dev dont use this !</p>
-<p>twig-layout is a layout system based on twig.</p>
-<h2>Instalation</h2><pre class="prettyprint source lang-bash"><code>$ npm install twig-layout</code></pre><h2>Exemple:</h2><p>This exemple use express and express-twig-layout</p>
+        <article><h2>express-twig-layout</h2><p>express-twig-layout is a layout system based on twig.</p>
+<h2>Instalation</h2><pre class="prettyprint source lang-bash"><code>$ npm install express-twig-layout</code></pre><h2>Exemple:</h2><p>This exemple use express and express-twig-layout</p>
 <p>install express and express-twig-layout</p>
 <pre class="prettyprint source lang-bash"><code>$ npm install --save express 
 $ npm install --save express-twig-layout</code></pre><h2>index.js</h2><p>Create a simple express app with two route: /home and /test</p>
-<pre class="prettyprint source lang-js"><code>var express = require('express')
-var layout = require('express-twig-layout')
-var app = express()
+<pre class="prettyprint source lang-js"><code>const express = require('express')
+const layout = require('express-twig-layout')
+const app = express()
 
 //set the views directory
-app.set('view', './views')
-app.use(layout({
-  extendFilter: {},
-  extendFunction:{}
+app.set('views', './views')
+
+app.use(layout({      
+  cache: false,
+  tmpDir: './tmp',
+  sourceMap: false,
+  mode: 'eval',
 }))
 
 //home route
-app.get('/home', async (req, res) => {
+app.get('/home', function (req, res) {
   //load the layout from the file home.html
-  await req.layout.loadTemplate('home.html')
+  req.layout.loadTemplate('home.html').then(() => {
     //send the layout html
-  const html = await req.layout.render()
-  res.send(html)
+    req.layout.render().then((html) => {
+      res.send(html)
+    })
+  })
 })
 
 //test route
 app.get('/test', function (req, res) {
   //load the layout from the file test.html
-  await req.layout.loadTemplate('test.html')
-  //Set the title of the block head
-  req.layout.getBlock('head').data.title = 'Test page'
-  //send the layout html
-  const html = await req.layout.render()
-  res.send(html)
+  req.layout.loadTemplate('test.html').then(() => {
+    //Set the title of the block head
+    req.layout.getBlock('head').data.title = 'Test page'
+    //send the layout html
+    req.layout.render().then((html) => {
+      res.send(html)
+    })
+  })
 })
 
 app.get('*', function (req, res) {
@@ -170,7 +176,7 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
 &lt;/template>
 &lt;script>
   //Require the block dependency
-  var Block = require('node-twig-layout/block')
+  var Block = require('twig-layout/block')
 
   //Block for the page
   class Default extends Block {
@@ -205,19 +211,19 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
         &lt;meta name=&quot;description&quot; content=&quot;&quot;>
         &lt;meta name=&quot;author&quot; content=&quot;&quot;>
 
-        &lt;title>{{title}}&lt;/title>
-        {% for file in css %}
-        &lt;link rel=&quot;stylesheet&quot; href=&quot;{{file}}&quot;>
+        &lt;title>{{ title }}&lt;/title>
+        {% for css in this.css %}
+        &lt;link rel=&quot;stylesheet&quot; href=&quot;{{ css.file }}&quot;>
         {% endfor %}
 
-        {% for file in js %}
-        &lt;script src=&quot;{{file}}&quot;>&lt;/script>
+        {% for js in this.js %}
+        &lt;script src=&quot;{{ js.file }}&quot;>&lt;/script>
         {% endfor %}
     &lt;/head>
 &lt;/template>
 &lt;script>
   //requite the block object
-  var Block = require('node-twig-layout/block')
+  var Block = require('twig-layout/block')
 
   //A Test class for the test page
   class Head extends Block {
@@ -225,23 +231,21 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
      * Init method
      */
     init() {
-      //unsorted array
-      this._css = []
-      this._js = []
+      this.name = 'head'
 
       //data array for render
-      this.data.css = []
-      this.data.js = []
+      this.css = []
+      this.js = []
     }
 
     //add css files
     addCss (cssFiles, weight = 0) {
       if (Array.isArray(cssFiles)) {
-        for (var key in cssFiles) {
-          this._css.push({weight: weight, file: cssFiles[key]})
+        for (const key in cssFiles) {
+          this.css.push({weight: weight, file: cssFiles[key]})
         }
       } else if (typeof cssFiles === 'string') {
-        this._css.push({weight: weight, file: cssFiles})
+        this.css.push({weight: weight, file: cssFiles})
       } else {
         throw Error('Invalid addCss argument')
       }
@@ -250,11 +254,11 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
     //add js files to the data object
     addJs (jsFiles) {
       if (Array.isArray(jsFiles)) {
-        for (var key in jsFiles) {
-          this._js.push({weight: weight, file: jsFiles[key]})
+        for (const key in jsFiles) {
+          this.js.push({weight: weight, file: jsFiles[key]})
         }
       } else if (typeof jsFiles === 'string') {
-        this._js.push({weight: weight, file: jsFiles})
+        this.js.push({weight: weight, file: jsFiles})
       } else {
         throw Error('Invalid addJs argument')
       }
@@ -264,16 +268,11 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
      * Before render callback
      */
     beforeRender() {
-      var sort = function(a, b) {
+      const sort = function(a, b) {
         return a.weight - b.weight
       }
-      this._css.sort(sort);
-      for (const key in this._css)
-        this.data.css.push(this._css[key].file)
-
-      this._js.sort(sort);
-      for (const key in this._js)
-        this.data.js.push(this._js[key].file)
+      this.css.sort(sort);
+      this.js.sort(sort);
     }
   }
 
@@ -281,12 +280,12 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
 &lt;/script></code></pre><h2>/views/home.html</h2><p>The template for the /home route</p>
 <pre class="prettyprint source lang-html"><code>&lt;template>
     &lt;div>
-        &lt;h1>Home page&lt;/h1>
+        &lt;h1>{{ this.title }}&lt;/h1>
     &lt;/div>
 &lt;/template>
 &lt;script>
   //requite the block object
-  var Block = require('node-twig-layout/block')
+  var Block = require('twig-layout/block')
 
   //A Block class for the home page
   class Home extends Block {
@@ -295,6 +294,9 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
       //name of the parent block of this block
       //here the block content, it is defined in the file page/default.html
       this.parent = 'content'
+      this.name = 'home'
+
+      this.title = 'Home page'
     }
 
     beforeRender() {
@@ -306,12 +308,12 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
 &lt;/script></code></pre><h2>/views/test.html</h2><p>The template for the /test route</p>
 <pre class="prettyprint source lang-html"><code>&lt;template>
     &lt;div class=&quot;test&quot;>
-        &lt;h1>Test&lt;/h1>
+        &lt;h1>{{ this.title }}&lt;/h1>
     &lt;/div>
 &lt;/template>
 &lt;script>
   //requite the block object
-  var Block = require('node-twig-layout/block')
+  var Block = require('twig-layout/block')
 
   //A Test class for the test page
   class Test extends Block {
@@ -319,7 +321,9 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
       this.page ='page/default.html'
       //name of the parent block of this block
       //here the block content, it is defined in the file page/default.html
-      this.parent= 'content'
+      this.parent = 'content'
+      this.name = 'test'
+      this.title = 'Test'
     }
   }
 
@@ -370,7 +374,7 @@ For the template syntax read the twig js <a href="https://github.com/twigjs/twig
 <span class="jsdoc-message">
 	Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.5.5</a>
 	
-		on 2019-01-13T15:31:57+01:00
+		on 2019-02-22T09:19:31+01:00
 	
 	using the <a href="https://github.com/docstrap/docstrap">DocStrap template</a>.
 </span>
