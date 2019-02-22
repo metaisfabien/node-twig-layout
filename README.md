@@ -2,6 +2,8 @@
 
 express-twig-layout is a layout system based on twig.
 
+[documentation](https://metaisfabien.github.io/node-twig-layout/) 
+
 ## Instalation
 
 ```bash
