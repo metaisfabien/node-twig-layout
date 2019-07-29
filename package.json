@@ -11,7 +11,7 @@
     "@midgar/utils": "^1.0.0-alpha.1.2",
     "node-eval": "^2.0.0",
     "string-hash": "^1.1.3",
-    "twig": "^1.13.2"
+    "twig": "^1.13.3"
   },
   "description": "A layout system build on top of twig js",
   "devDependencies": {
@@ -41,5 +41,5 @@
   "scripts": {
     "build-docs": "jsdoc -c ./jsdoc.js -t ./node_modules/ink-docstrap/template  -r ."
   },
-  "version": "0.1.4"
+  "version": "0.1.5"
 }

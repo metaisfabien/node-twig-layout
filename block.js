@@ -70,8 +70,8 @@ class Block {
      * Block data object, it's the object passed to twig for render
      * @type {string}
      */
-    this.data = {}
-
+    this.data = options.data ? options.data : {}
+     
     //bind block in data
     this.data.this = this;
 
@@ -241,6 +241,15 @@ class Block {
    */
   getBlock(name) {
     return this.layout.getBlock(name)
+  }
+
+  /**
+   * Get parent block instance
+   * 
+   * @return {Block} Block instance
+   */
+  getParent() {
+    return this.parent
   }
 
   /**

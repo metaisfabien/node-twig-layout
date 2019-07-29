@@ -268,9 +268,10 @@ class Layout extends EventEmitter {
 
       //path of the block script
       let script = config.script ? config.script : null
+      let data = config.data ? config.data : null
 
       //load the block
-      loadBlocks.push(this._loadBlock(config.name, config.template, config, script, parent))
+      loadBlocks.push(this._loadBlock(config.name, config.template, data, config, script, parent))
     }
 
     return Promise.all(loadBlocks)
@@ -289,7 +290,7 @@ class Layout extends EventEmitter {
    *
    * @private
    */
-  async _loadBlock(name, template, config, script, parent) {
+  async _loadBlock(name, template, data, config, script, parent) {
     //check if the block have no name and no template connot load the block
     if (!name && !template) {
       let error = new Error('A block have no name and no template')
@@ -300,7 +301,7 @@ class Layout extends EventEmitter {
     let block = null
     try {
       //create block
-      block = await this.createBlock({ name: name, template: template, config: config, script: script, parent: parent })
+      block = await this.createBlock({ name, template, data, config, script, parent })
     } catch (error) {
       const params = {} 
       if (error.code != 'ENOENT') {
@@ -382,6 +383,7 @@ class Layout extends EventEmitter {
         html: html, 
         config: options.config || {},
         parent: options.parent,
+        data: options.data,
         template: options.template || null,
         cache: this._cache
       })
@@ -428,7 +430,7 @@ class Layout extends EventEmitter {
     const childrenBlock = block.getChildrenBlock()
     //load children block
     if (childrenBlock && childrenBlock.length) {
-      await this._loadBlocks(childrenBlock, block.name)
+      await this._loadBlocks(childrenBlock, block)
     }
 
     //after init children hook

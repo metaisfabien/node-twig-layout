@@ -72,7 +72,8 @@ app.listen(3000, function () {
 ```
 
 ## /views/page/default.html
-The template for the page
+The template for the page.
+
 For the template syntax read the twig js [documentation](https://github.com/twigjs/twig.js/wiki) 
 ```html
 <template>
